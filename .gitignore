@@ -1,0 +1,32 @@
+# Node modules
+node_modules/
+
+# Environment variable files
+.env
+.env*
+
+# Files
+something.txt
+
+# Log files
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local data/persistence
+*.sqlite
+*.db
+*.bak
+*.tmp
+
+# Processed event files (optional, if you want to keep them local)
+processed_nostr_events.json
+
+# Misc
+*.swp
