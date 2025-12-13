@@ -1,4 +1,4 @@
-// Nostrcoin Indexer Node v0.0.8 – With Multi-Indexer Sync
+// Nostrcoin Indexer Node v0.0.9 – With Halving Schedule
 const http = require('http');
 const { WebSocket } = require('ws');
 const validator = require('./nostrcoin-validator.js');
@@ -25,8 +25,8 @@ const CONFIG = {
   syncInterval: 30000, // Sync with peers every 30 seconds
   dbPath: './nostrcoin.db',
   // Add peer indexers here - these will be synced with
-  peerIndexers: [ 
-    // Example: 'https://another-indexer.com',  // ← For syncing with other indexers
+  peerIndexers: [
+    // Example: 'https://another-indexer.com',
     // Add more as they become available
   ]
 };

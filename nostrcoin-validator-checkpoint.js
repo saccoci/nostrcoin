@@ -1,4 +1,4 @@
-// Nostrcoin Validation Library v0.0.2
+// Nostrcoin Validation Library v0.0.3 - With Halving Schedule
 // Pure JavaScript - works in browser or Node.js
 // No dependencies, fully deterministic
 
@@ -6,7 +6,8 @@ const NOSTRCOIN = {
   // Protocol constants
   MAX_SUPPLY: 21000000,
   DECIMALS: 8,
-  BLOCK_REWARD: 50,
+  INITIAL_BLOCK_REWARD: 50,
+  HALVING_INTERVAL: 210000, // Halve every 210,000 blocks (~4 years)
   BLOCK_INTERVAL: 600000, // 10 minutes in milliseconds
   DIFFICULTY: 4, // Leading zeros required in event ID
   
@@ -21,6 +22,21 @@ const NOSTRCOIN = {
   // Genesis block timestamp (set this to your launch time)
   GENESIS_TIME: 1764968400000   // Wed Nov 27 2025 00:00:00 UTC
 };
+
+/**
+ * Calculate block reward based on block height (with halving)
+ */
+function getBlockReward(blockHeight) {
+  const halvings = Math.floor(blockHeight / NOSTRCOIN.HALVING_INTERVAL);
+  
+  // After 64 halvings, reward becomes 0 (all 21M mined)
+  if (halvings >= 64) {
+    return 0;
+  }
+  
+  // Calculate reward: 50 / (2^halvings)
+  return NOSTRCOIN.INITIAL_BLOCK_REWARD / Math.pow(2, halvings);
+}
 
 /**
  * Get the current epoch number based on timestamp
@@ -62,18 +78,23 @@ function validateMiningEvent(event, existingEvents = []) {
   });
   
   if (epochWinner) {
-  // If there's already a winner, check if this event is earlier
-  if (event.created_at < epochWinner.created_at) {
-    return { valid: true, reason: "Earlier than existing winner", reward: NOSTRCOIN.BLOCK_REWARD, replacesEvent: epochWinner.id };
-  }
+    // If there's already a winner, check if this event is earlier
+    if (event.created_at < epochWinner.created_at) {
+      // Calculate block height for reward
+      const blockHeight = existingEvents.filter(e => e.kind === NOSTRCOIN.KIND_MINING).length;
+      const reward = getBlockReward(blockHeight);
+      return { valid: true, reason: "Earlier than existing winner", reward, replacesEvent: epochWinner.id };
+    }
 
-  // Tie: same timestamp → lexicographically smaller ID wins
-  if (event.created_at === epochWinner.created_at && event.id < epochWinner.id) {
-    return { valid: true, reason: "Tie-breaker winner", reward: NOSTRCOIN.BLOCK_REWARD, replacesEvent: epochWinner.id };
-  }
+    // Tie: same timestamp → lexicographically smaller ID wins
+    if (event.created_at === epochWinner.created_at && event.id < epochWinner.id) {
+      const blockHeight = existingEvents.filter(e => e.kind === NOSTRCOIN.KIND_MINING).length;
+      const reward = getBlockReward(blockHeight);
+      return { valid: true, reason: "Tie-breaker winner", reward, replacesEvent: epochWinner.id };
+    }
 
-  return { valid: false, reason: "Epoch already has a winner" };
-}
+    return { valid: false, reason: "Epoch already has a winner" };
+  }
   
   // 6. Check user hasn't mined multiple times in same epoch (spam prevention)
   const userAttemptsThisEpoch = existingEvents.filter(e => {
@@ -85,7 +106,11 @@ function validateMiningEvent(event, existingEvents = []) {
     return { valid: false, reason: "User already attempted mining this epoch" };
   }
   
-  return { valid: true, reward: NOSTRCOIN.BLOCK_REWARD, epoch };
+  // Calculate block height to determine reward
+  const blockHeight = existingEvents.filter(e => e.kind === NOSTRCOIN.KIND_MINING).length;
+  const reward = getBlockReward(blockHeight);
+  
+  return { valid: true, reward, epoch };
 }
 
 /**
@@ -156,6 +181,7 @@ function computeBalances(events) {
   
   // Track which epochs have been mined
   const minedEpochs = new Set();
+  let blockHeight = 0; // Track actual block count for halving
   
   for (const event of sortedEvents) {
     if (event.kind === NOSTRCOIN.KIND_MINING) {
@@ -166,9 +192,11 @@ function computeBalances(events) {
         
         // Only award if epoch not already mined
         if (!minedEpochs.has(epoch)) {
-          balances[event.pubkey] = (balances[event.pubkey] || 0) + validation.reward;
-          totalSupply += validation.reward;
+          const reward = getBlockReward(blockHeight);
+          balances[event.pubkey] = (balances[event.pubkey] || 0) + reward;
+          totalSupply += reward;
           minedEpochs.add(epoch);
+          blockHeight++; // Increment block height for halving calculation
         }
       }
     }
@@ -201,17 +229,27 @@ function getHistory(pubkey, events) {
   const history = [];
   
   const sortedEvents = [...events].sort((a, b) => a.created_at - b.created_at);
+  let blockHeight = 0;
   
   for (const event of sortedEvents) {
     if (event.kind === NOSTRCOIN.KIND_MINING && event.pubkey === pubkey) {
       const validation = validateMiningEvent(event, sortedEvents.slice(0, sortedEvents.indexOf(event)));
       if (validation.valid) {
+        const reward = getBlockReward(blockHeight);
         history.push({
           type: 'mined',
-          amount: validation.reward,
+          amount: reward,
           timestamp: event.created_at,
-          eventId: event.id
+          eventId: event.id,
+          blockHeight: blockHeight
         });
+        blockHeight++;
+      }
+    } else if (event.kind === NOSTRCOIN.KIND_MINING) {
+      // Track block height even for other miners
+      const validation = validateMiningEvent(event, sortedEvents.slice(0, sortedEvents.indexOf(event)));
+      if (validation.valid) {
+        blockHeight++;
       }
     }
     
@@ -273,6 +311,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     NOSTRCOIN,
     getEpoch,
+    getBlockReward,
     validateMiningEvent,
     validateTransferEvent,
     computeBalances,
@@ -286,6 +325,7 @@ if (typeof window !== 'undefined') {
   window.NostrcoinValidator = {
     NOSTRCOIN,
     getEpoch,
+    getBlockReward,
     validateMiningEvent,
     validateTransferEvent,
     computeBalances,
