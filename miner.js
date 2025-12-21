@@ -17,7 +17,7 @@ const CONFIG = {
     'wss://offchain.pub'
   ],
   eventKind: 30333,
-  difficulty: 4,
+  difficulty: 5,
   protocolTag: 'nostrcoin',
   indexerUrl: 'http://localhost:3000'
 };

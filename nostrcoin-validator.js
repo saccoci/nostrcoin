@@ -9,7 +9,7 @@ const NOSTRCOIN = {
   INITIAL_BLOCK_REWARD: 50,
   HALVING_INTERVAL: 210000, // Halve every 210,000 blocks (~4 years)
   BLOCK_INTERVAL: 600000, // 10 minutes in milliseconds
-  DIFFICULTY: 4, // Leading zeros required in event ID
+  DIFFICULTY: 5, // Leading zeros required in event ID; to change difficulty, both validator and miner must be the same
   
   // Event kinds (custom Nostrcoin kinds)
   KIND_GENESIS: 30000,

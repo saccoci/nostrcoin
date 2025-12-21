@@ -1,19 +1,33 @@
+
 # ⚡ Nostrcoin (NSTC)
 
 A Nostr-native cryptocurrency experiment with proof-of-work mining.
 This is for fun and educational purposes only! Do not invest any real money.
 
-**Version:** 0.0.9 (Indexer) / 0.0.5 (Miner) / 0.0.3 (Validator)  
-**Status:** Educational/Experimental  
-**Max Supply:** 21,000,000 NSTC  
-**Initial Block Reward:** 50 NSTC (halves every 210,000 blocks)  
-**Epoch Time:** 10 minutes (in Nostrcoin, an "epoch" is a 10 minute period)  
-**Event Kinds:** 30333 (mining), 30334 (transfers)  
-**Difficulty:** 4 leading zeros required in event ID
-
 ## What is Nostrcoin?
 
 Nostrcoin is a fully decentralized cryptocurrency built entirely on Nostr. Unlike traditional cryptocurrencies that use blockchains, Nostrcoin uses Nostr events as the ledger. Anyone can validate the entire history, and no single authority controls the network.
+
+**Version:** 0.0.9 (Indexer) / 0.0.5 (Miner) / 0.0.3 (Validator)
+**Status:** Educational/Experimental
+**Max Supply:** 21,000,000 NSTC
+**Initial Block Reward:** 50 NSTC (halves every 210,000 blocks)
+**Epoch Time:** 10 minutes (in Nostrcoin, an "epoch" is a 10 minute period)
+**Event Kinds:** 30333 (mining), 30334 (transfers)
+**Difficulty:** 4 leading zeros required in event ID
+
+## ⚠️ Disclaimer: Expect Chaos ⚠️
+
+This is an experimental educational project. **Expect:**
+- It **will break** (bugs everywhere)
+- It **will fail** (systems crash, data corrupts)
+- It **will fork** (chain splits, conflicting states)
+- It **will get hacked** (exploits will be found)
+- It **will get quantum computer'd** (eventually)
+- It **will get AI'd** (bots will game it)
+- It **will get rekt** (and any and all things bad)
+
+**Do not invest real money. This has ZERO monetary value.**
 
 ## Core Principles
 
@@ -39,11 +53,22 @@ nostrcoin/
 
 ## Quick Start
 
+### Use the Wallet or Explorer
+
+The easiest way to interact with Nostrcoin is via the wallet at https://saccoci.github.io/wallet. Login with a Nostr signing extension or nsec. The wallet allows you to:
+- Connect with Nostr extension (Alby, AKA Profiles, Gooti, etc.)
+- Mine NSTC with proof-of-work
+- Send NSTC to other users
+- View transaction history
+- Generate receive QR codes
+
+The explorer allows you to view information such as supply, block height, epoch, blocks, and transfers. View it at https://saccoci.github.io/explorer
+
 ### Run the Indexer
 
 ```bash
 # Clone the repo
-git clone https://codeberg.org/saccoci/nostrcoin.git
+git clone https://github.com/saccoci/nostrcoin.git
 cd nostrcoin
 
 # Install dependencies
@@ -76,15 +101,6 @@ The miner will:
 - Automatically wait for the next epoch if a block is found
 - Check balance from the indexer after mining
 - Display hash rate and mining statistics
-
-### Use the Wallet
-
-Wallet and explorer interfaces are available separately. The wallet allows you to:
-- Connect with Nostr extension (Alby, AKA Profiles, Gooti, etc.)
-- Mine NSTC with proof-of-work
-- Send NSTC to other users
-- View transaction history
-- Generate receive QR codes
 
 ## How It Works
 
@@ -200,7 +216,7 @@ Nostrcoin uses custom Nostr event kinds with protocol tag filtering:
   - Must include `["protocol", "nostrcoin"]` tag
   - Event ID must start with 4 zeros
   - First valid event in each 10-minute epoch wins
-  
+
 - **30334**: Transfer events (sending NSTC)
   - Must include `["protocol", "nostrcoin"]` tag
   - Tags: `["p", "recipient_pubkey"]` and `["amount", "5.00000000"]`
@@ -225,9 +241,58 @@ All events are public and stored on Nostr relays.
 
 ⚠️ **This is an educational experiment.** Nostrcoin has no financial value and is not intended as an investment. It's a demonstration of how decentralized systems can be built on Nostr.
 
-## Contributing
+## How You Can Help Nostrcoin
 
-Contributions welcome! Open issues or submit PRs on Codeberg.
+The network needs **always-on indexer nodes** to stay resilient and decentralized. Here's how you can help:
+
+### Run an Always-On Node
+
+The most valuable contribution is running a public indexer 24/7:
+
+1. **Set up a VPS** (DigitalOcean, AWS, Vultr, etc.)
+2. **Install and run the indexer** (see "Running a Node" section)
+3. **Keep it running** with PM2 or systemd
+4. **Make it public** by opening port 3000
+5. **Share your indexer URL** with the community
+
+**Why this matters:**
+- More nodes = more resilient network
+- More nodes = faster sync for new participants
+- More nodes = harder to censor or attack
+- Decentralization requires actual distributed nodes!
+
+### Share Your Peer Address
+
+If you're running an indexer, **share your URL**:
+
+1. **Add it to the forum**: https://nostrcoin.boards.net
+2. **Post it on Nostr** with hashtag #nostrcoin
+3. **Add it to GitHub issues** as a peer indexer
+4. **Configure peer sync** in your `indexer.js`:
+```javascript
+   peerIndexers: [
+     'http://your-indexer-ip:3000',
+     // Share this URL!
+   ]
+```
+
+### What We Need Most
+
+**Priority 1**: Always-on VPS indexers
+- Even a $5/month droplet helps
+- The more geographically distributed, the better
+- Uptime matters more than speed
+
+**Priority 2**: Peer discovery
+- We need a way for nodes to find each other
+- Consider announcing your indexer publicly
+
+**Priority 3**: Testing and bug reports
+- Break things and report them
+- Try to exploit the system (responsibly)
+- Document edge cases
+
+**The network is only as decentralized as the number of independent nodes running.**
 
 ## License
 
@@ -252,7 +317,7 @@ Indexers can be configured to sync with other indexers, enabling:
 
 ## Links
 
-- **Repository**: https://codeberg.org/saccoci/nostrcoin
+- **Repository**: https://github.com/saccoci/nostrcoin
 - **Nostr**: Find updates via npub (coming soon)
 
 ---
