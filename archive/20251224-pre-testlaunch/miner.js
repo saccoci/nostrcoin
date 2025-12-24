@@ -18,7 +18,7 @@ const CONFIG = {
   ],
   eventKind: 30333,
   difficulty: 5,
-  protocolTag: 'nostrcoin-testlaunch',
+  protocolTag: 'nostrcoin',
   indexerUrl: 'http://localhost:3000'
 };
 
@@ -45,7 +45,7 @@ async function publishToRelays(event) {
       const ws = new WebSocket(relayUrl);
       let receivedOK = false;
       let receivedMessage = false;
-      
+
       ws.on('open', () => {
         ws.send(JSON.stringify(['EVENT', event]));
       });
@@ -64,7 +64,7 @@ async function publishToRelays(event) {
           }
         } catch (e) {}
       });
-      
+
       ws.on('error', () => {
         resolve(false);
       });
@@ -78,7 +78,7 @@ async function publishToRelays(event) {
       }, 3000);
     });
   });
-  
+
   const results = await Promise.allSettled(promises);
   const successful = results.filter(r => r.value === true).length;
   return successful;
@@ -104,13 +104,13 @@ async function mineBlock(targetEpoch) {
   const target = '0'.repeat(CONFIG.difficulty);
   let attempts = 0;
   const startTime = Date.now();
-  
+
   const spinners = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
-  
+
   while (mining) {
     const nonce = crypto.randomBytes(8).toString('hex');
-    
+
     const event = {
       kind: CONFIG.eventKind,
       created_at: Math.floor(Date.now() / 1000),
@@ -122,7 +122,7 @@ async function mineBlock(targetEpoch) {
       content: 'Mining NSTC',
       pubkey: publicKey
     };
-    
+
     // Calculate event ID
     const serialized = JSON.stringify([
       0,
@@ -133,18 +133,18 @@ async function mineBlock(targetEpoch) {
       event.content
     ]);
     const eventId = crypto.createHash('sha256').update(serialized).digest('hex');
-    
-    const currentEpoch = Math.floor((Date.now() - 1766581200000) / 600000);
-    
+
+    const currentEpoch = Math.floor((Date.now() - 1764968400000) / 600000);
+
     // Check if we've moved to a new epoch
     if (currentEpoch !== targetEpoch) {
       process.stdout.write('\r' + ' '.repeat(80) + '\r');
       return false;
     }
-    
+
     attempts++;
     stats.attempts++;
-    
+
     // Update display every 1000 attempts
     if (attempts % 1000 === 0) {
       const elapsed = (Date.now() - startTime) / 1000;
@@ -156,30 +156,30 @@ async function mineBlock(targetEpoch) {
         `${hashRate.toLocaleString()} H/s`
       );
     }
-    
+
     // Check if valid proof-of-work
     if (eventId.startsWith(target)) {
       const elapsed = (Date.now() - startTime) / 1000;
       process.stdout.write('\r' + ' '.repeat(80) + '\r');
       console.log(`✨ BLOCK FOUND! Event ID: ${eventId}`);
       console.log(`   Attempts: ${attempts.toLocaleString()} | Time: ${elapsed.toFixed(2)}s`);
-      
+
       // Sign the event properly with nostr-tools
       event.id = eventId;
       const signedEvent = finalizeEvent(event, privateKey);
-      
+
       // Publish to relays
       console.log('📡 Publishing to relays...');
       const successful = await publishToRelays(signedEvent);
       console.log(`   Published to ${successful}/${CONFIG.relays.length} relays`);
-      
+
       stats.blocksFound++;
       stats.lastBlockTime = new Date().toLocaleString();
-      
+
       // Wait 5 seconds for indexer to process
       console.log('⏳  Waiting for indexer to process...');
       await new Promise(resolve => setTimeout(resolve, 5000));
-      
+
       // Check new balance
       const balance = await checkBalance();
       if (balance !== null) {
@@ -187,11 +187,11 @@ async function mineBlock(targetEpoch) {
       } else {
         console.log('⚠️  Could not fetch balance from indexer');
       }
-      
+
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -208,8 +208,8 @@ async function startMining() {
 
   while (mining) {
     const now = Date.now();
-    const currentEpoch = Math.floor((now - 1766581200000) / 600000);
-    const nextEpochStart = 1766581200000 + (currentEpoch + 1) * 600000;
+    const currentEpoch = Math.floor((now - 1764968400000) / 600000);
+    const nextEpochStart = 1764968400000 + (currentEpoch + 1) * 600000;
 
     await mineBlock(currentEpoch);
 
@@ -243,7 +243,7 @@ async function main() {
   console.log('╔═══════════════════════════════════════╗');
   console.log('║   Nostrcoin Continuous Miner v0.0.5   ║');
   console.log('╚═══════════════════════════════════════╝\n');
-  
+
   // Load private key
   if (!privateKeyHex) {
     console.log('❌ Missing NOSTR_PRIVATE_KEY_HEX environment variable.');
@@ -263,14 +263,14 @@ async function main() {
     privateKey = hexToBytes(privateKeyHex);
     const { getPublicKey } = require('nostr-tools/pure');
     publicKey = getPublicKey(privateKey);
-    
+
     console.log(`✓ Public key derived: ${publicKey.substring(0, 16)}...`);
     console.log(`✓ Public key length: ${publicKey.length}\n`);
   } catch (error) {
     console.log('\n❌ Invalid private key:', error.message);
     process.exit(1);
   }
-  
+
   // Handle Ctrl+C
   process.on('SIGINT', () => {
     console.log('\n\n🛑 Stopping miner...\n');
@@ -278,7 +278,7 @@ async function main() {
     displayStats();
     process.exit(0);
   });
-  
+
   // Check connection to indexer
   console.log('🔍 Checking connection to indexer...');
   const balance = await checkBalance();
@@ -288,7 +288,7 @@ async function main() {
   } else {
     console.log('⚠️  Could not connect to indexer, but mining will continue\n');
   }
-  
+
   // Start mining
   await startMining();
 }
