@@ -1,4 +1,3 @@
-
 # ⚡ Nostrcoin (NSTC)
 
 A Nostr-native cryptocurrency experiment with proof-of-work mining.
@@ -8,7 +7,7 @@ This is for fun and educational purposes only! Do not invest any real money.
 
 Nostrcoin is a fully decentralized cryptocurrency built entirely on Nostr. Unlike traditional cryptocurrencies that use blockchains, Nostrcoin uses Nostr events as the ledger. Anyone can validate the entire history, and no single authority controls the network.
 
-**Version:** 0.0.9 (Indexer) / 0.0.5 (Miner) / 0.0.3 (Validator)
+**Version:** 0.0.9 (Indexer) / 0.0.5 (Miner) / 0.0.5 (Validator)
 **Status:** Educational/Experimental
 **Max Supply:** 21,000,000 NSTC
 **Initial Block Reward:** 50 NSTC (halves every 210,000 blocks)
@@ -25,7 +24,7 @@ This is an experimental educational project. **Expect:**
 - It **will get hacked** (exploits will be found)
 - It **will get quantum computer'd** (eventually)
 - It **will get AI'd** (bots will game it)
-- It **will get rekt** (and any and all things bad)
+- It **will get rekt** (and any and all things bad will happen)
 
 **Do not invest real money. This has ZERO monetary value.**
 
@@ -49,14 +48,14 @@ nostrcoin/
 └── LICENSE                    # MIT License
 ```
 
-**Note:** Wallet and explorer HTML files are hosted separately or available in archive folders.
+**Note:** Wallet and explorer HTML files are hosted separately at https://saccoci.github.io.
 
 ## Quick Start
 
 ### Use the Wallet or Explorer
 
 The easiest way to interact with Nostrcoin is via the wallet at https://saccoci.github.io/wallet. Login with a Nostr signing extension or nsec. The wallet allows you to:
-- Connect with Nostr extension (Alby, AKA Profiles, Gooti, etc.)
+- Connect with Nostr signing extension (e.g. Alby, AKA Profiles, Gooti, nos2x, Flamingo, etc.)
 - Mine NSTC with proof-of-work
 - Send NSTC to other users
 - View transaction history
@@ -85,6 +84,7 @@ The indexer will:
 - Store events in SQLite database for persistence
 - Sync with peer indexers (if configured)
 - Provide HTTP API on port 3000
+- Check the forum for help: https://nostrcoin.boards.net
 
 ### Run the Miner
 
@@ -101,6 +101,7 @@ The miner will:
 - Automatically wait for the next epoch if a block is found
 - Check balance from the indexer after mining
 - Display hash rate and mining statistics
+- Check the forum for help: https://nostrcoin.boards.net
 
 ## How It Works
 
@@ -224,23 +225,6 @@ Nostrcoin uses custom Nostr event kinds with protocol tag filtering:
 
 All events are public and stored on Nostr relays.
 
-## Roadmap
-
-- [x] Validation library
-- [x] Indexer node
-- [x] Database persistence (SQLite)
-- [x] Peer indexer sync
-- [x] Halving schedule (every 210,000 blocks)
-- [x] Continuous miner with epoch awareness
-- [x] Web wallet
-- [ ] Mobile wallet
-- [ ] Lightning integration
-- [ ] Enhanced federation features
-
-## Educational Purpose
-
-⚠️ **This is an educational experiment.** Nostrcoin has no financial value and is not intended as an investment. It's a demonstration of how decentralized systems can be built on Nostr.
-
 ## How You Can Help Nostrcoin
 
 The network needs **always-on indexer nodes** to stay resilient and decentralized. Here's how you can help:
@@ -294,6 +278,10 @@ If you're running an indexer, **share your URL**:
 
 **The network is only as decentralized as the number of independent nodes running.**
 
+## Educational Purpose
+
+⚠️ **This is an educational experiment.** Nostrcoin has no financial value and is not intended as an investment. It's a demonstration of how decentralized systems can be built on Nostr.
+
 ## License
 
 MIT License - See LICENSE file
@@ -318,8 +306,10 @@ Indexers can be configured to sync with other indexers, enabling:
 ## Links
 
 - **Repository**: https://github.com/saccoci/nostrcoin
-- **Nostr**: Find updates via npub (coming soon)
+- **Wallet**: https://saccoci.github.io/wallet
+- **Explorer**: https://saccoci.github.io/explorer
+- **Forum**: https://nostrcoin.boards.net
 
 ---
 
-**Built on Nostr. Inspired by Bitcoin. Educational by design.**
+**Inspired by Bitcoin. Built on Nostr.**

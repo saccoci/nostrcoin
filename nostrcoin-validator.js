@@ -1,4 +1,4 @@
-// Nostrcoin Validation Library v0.0.3 - With Halving Schedule
+// Nostrcoin Validation Library v0.0.5 - With Halving Schedule
 // Pure JavaScript - works in browser or Node.js
 // No dependencies, fully deterministic
 
@@ -19,7 +19,7 @@ const NOSTRCOIN = {
   // Protocol identifier
   PROTOCOL_TAG: "nostrcoin",
   
-  // Genesis block timestamp (set this to your launch time)
+  // Genesis block timestamp (launch day and time)
   GENESIS_TIME: 1764968400000   // Wed Nov 27 2025 00:00:00 UTC
 };
 
