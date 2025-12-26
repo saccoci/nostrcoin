@@ -1,4 +1,4 @@
-// Nostrcoin Validation Library v0.0.3 - With Halving Schedule
+// Nostrcoin Validation Library v0.0.5 - With Halving Schedule
 // Pure JavaScript - works in browser or Node.js
 // No dependencies, fully deterministic
 

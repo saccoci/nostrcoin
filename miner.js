@@ -17,8 +17,8 @@ const CONFIG = {
     'wss://offchain.pub'
   ],
   eventKind: 30333,
-  difficulty: 5,
-  protocolTag: 'nostrcoin-testlaunch',
+  difficulty: 4,
+  protocolTag: 'nostrcoin',
   indexerUrl: 'http://localhost:3000'
 };
 
@@ -134,7 +134,7 @@ async function mineBlock(targetEpoch) {
     ]);
     const eventId = crypto.createHash('sha256').update(serialized).digest('hex');
     
-    const currentEpoch = Math.floor((Date.now() - 1766581200000) / 600000);
+    const currentEpoch = Math.floor((Date.now() - 1764968400000) / 600000);
     
     // Check if we've moved to a new epoch
     if (currentEpoch !== targetEpoch) {
@@ -208,8 +208,8 @@ async function startMining() {
 
   while (mining) {
     const now = Date.now();
-    const currentEpoch = Math.floor((now - 1766581200000) / 600000);
-    const nextEpochStart = 1766581200000 + (currentEpoch + 1) * 600000;
+    const currentEpoch = Math.floor((now - 1764968400000) / 600000);
+    const nextEpochStart = 1764968400000 + (currentEpoch + 1) * 600000;
 
     await mineBlock(currentEpoch);
 

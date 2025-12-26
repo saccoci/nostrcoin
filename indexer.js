@@ -38,7 +38,7 @@ let db;
 // Initialize database
 function initDatabase() {
   db = new Database(CONFIG.dbPath);
-  
+
   // Create events table
   db.exec(`
     CREATE TABLE IF NOT EXISTS events (
@@ -54,7 +54,7 @@ function initDatabase() {
       epoch INTEGER
     )
   `);
-  
+
   // Create index for faster queries
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_kind ON events(kind);
@@ -62,14 +62,14 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_created_at ON events(created_at);
     CREATE INDEX IF NOT EXISTS idx_epoch ON events(epoch);
   `);
-  
+
   console.log('✓ Database initialized');
 }
 
 // Load events from database
 function loadEventsFromDB() {
   const rows = db.prepare('SELECT * FROM events ORDER BY created_at ASC').all();
-  
+
   events = rows.map(row => ({
     id: row.id,
     kind: row.kind,
@@ -79,9 +79,9 @@ function loadEventsFromDB() {
     tags: JSON.parse(row.tags),
     sig: row.sig
   }));
-  
+
   console.log(`✓ Loaded ${events.length} events from database`);
-  
+
   // Set lastPollTime to most recent event, or 1 hour ago if empty
   if (events.length > 0) {
     const mostRecent = Math.max(...events.map(e => e.created_at));
@@ -92,16 +92,16 @@ function loadEventsFromDB() {
 // Save event to database
 function saveEventToDB(event, sourceRelay) {
   try {
-    const epoch = event.kind === validator.NOSTRCOIN.KIND_MINING 
-      ? validator.getEpoch(event.created_at * 1000) 
+    const epoch = event.kind === validator.NOSTRCOIN.KIND_MINING
+      ? validator.getEpoch(event.created_at * 1000)
       : null;
-    
+
     const stmt = db.prepare(`
-      INSERT OR IGNORE INTO events 
+      INSERT OR IGNORE INTO events
       (id, kind, pubkey, created_at, content, tags, sig, first_seen, source_relay, epoch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    
+
     stmt.run(
       event.id,
       event.kind,
@@ -114,7 +114,7 @@ function saveEventToDB(event, sourceRelay) {
       sourceRelay,
       epoch
     );
-    
+
     return true;
   } catch (error) {
     console.error(`Error saving event to DB:`, error.message);
@@ -130,7 +130,7 @@ function pollRelay(relayUrl) {
 
     ws.on('open', () => {
       const subId = 'poll-' + Date.now();
-      ws.send(JSON.stringify(['REQ', subId, { 
+      ws.send(JSON.stringify(['REQ', subId, {
         kinds: CONFIG.eventKinds,
         since: lastPollTime
       }]));
@@ -171,13 +171,13 @@ function pollRelay(relayUrl) {
 
 async function pollAllRelays() {
   console.log(`\n🔍 Polling relays for new events (since ${new Date(lastPollTime * 1000).toLocaleTimeString()})...`);
-  
+
   const promises = CONFIG.relays.map(relay => pollRelay(relay));
   const results = await Promise.allSettled(promises);
-  
+
   let newEventsCount = 0;
   let totalEventsReceived = 0;
-  
+
   results.forEach((result, index) => {
     if (result.status === 'fulfilled') {
       totalEventsReceived += result.value.length;
@@ -191,13 +191,13 @@ async function pollAllRelays() {
       }
     }
   });
-  
+
   console.log(`  Total: ${totalEventsReceived} received, ${newEventsCount} new`);
-  
+
   if (newEventsCount === 0 && totalEventsReceived === 0) {
     console.log(`  No new events found`);
   }
-  
+
   lastPollTime = Math.floor(Date.now() / 1000);
 }
 
@@ -208,26 +208,26 @@ async function syncWithPeers() {
   }
 
   console.log(`\n🔄 Syncing with ${CONFIG.peerIndexers.length} peer indexer(s)...`);
-  
+
   for (const peerUrl of CONFIG.peerIndexers) {
     try {
       console.log(`  → Fetching from ${peerUrl}`);
-      
+
       const response = await fetch(`${peerUrl}/export`, {
         timeout: 10000
       });
-      
+
       if (!response.ok) {
         console.log(`  ✗ ${peerUrl}: HTTP ${response.status}`);
         continue;
       }
-      
+
       const data = await response.json();
       const peerEvents = data.events || [];
-      
+
       let newFromPeer = 0;
       let conflictsResolved = 0;
-      
+
       for (const event of peerEvents) {
         const result = handleEvent(event, `peer:${peerUrl}`);
         if (result === true) {
@@ -236,13 +236,13 @@ async function syncWithPeers() {
           conflictsResolved++;
         }
       }
-      
+
       if (newFromPeer > 0 || conflictsResolved > 0) {
         console.log(`  ✓ ${peerUrl}: ${newFromPeer} new, ${conflictsResolved} conflicts resolved`);
       } else {
         console.log(`  ✓ ${peerUrl}: Already synced`);
       }
-      
+
     } catch (error) {
       console.log(`  ✗ ${peerUrl}: ${error.message}`);
     }
@@ -257,15 +257,15 @@ function handleEvent(event, sourceIdentifier) {
   const hasTag = event.tags?.some(t => t[0] === 'protocol' && t[1] === validator.NOSTRCOIN.PROTOCOL_TAG);
   if (!hasTag) return false;
 
-  const sourceDisplay = sourceIdentifier.startsWith('peer:') 
-    ? sourceIdentifier.replace('peer:', '📡 ') 
+  const sourceDisplay = sourceIdentifier.startsWith('peer:')
+    ? sourceIdentifier.replace('peer:', '📡 ')
     : sourceIdentifier;
-  
+
   console.log(`  → New event from ${sourceDisplay} – kind ${event.kind} – ${event.pubkey.slice(0,8)}...`);
 
   if (event.kind === validator.NOSTRCOIN.KIND_MINING) {
     const epoch = validator.getEpoch(event.created_at * 1000);
-    
+
     const existingEpochEvent = events.find(e => {
       if (e.kind !== validator.NOSTRCOIN.KIND_MINING) return false;
       const eEpoch = validator.getEpoch(e.created_at * 1000);
@@ -281,7 +281,7 @@ function handleEvent(event, sourceIdentifier) {
         saveEventToDB(event, sourceIdentifier);
         return 'replaced';
       }
-      
+
       if (event.created_at === existingEpochEvent.created_at && event.id < existingEpochEvent.id) {
         console.log(`     Replacing old block (tie-breaker) for epoch ${epoch}`);
         events = events.filter(e => e.id !== existingEpochEvent.id);
@@ -290,7 +290,7 @@ function handleEvent(event, sourceIdentifier) {
         saveEventToDB(event, sourceIdentifier);
         return 'replaced';
       }
-      
+
       console.log(`     Rejected (existing block better) for epoch ${epoch}`);
       return false;
     }
@@ -397,7 +397,7 @@ const server = http.createServer((req, res) => {
     const totalRows = db.prepare('SELECT COUNT(*) as count FROM events').get();
     const oldestEvent = db.prepare('SELECT MIN(created_at) as oldest FROM events').get();
     const newestEvent = db.prepare('SELECT MAX(created_at) as newest FROM events').get();
-    
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       totalStoredEvents: totalRows.count,
@@ -425,18 +425,18 @@ const server = http.createServer((req, res) => {
 async function start() {
   console.log('Nostrcoin Indexer v0.0.8 – With Multi-Indexer Sync');
   console.log('===================================================\n');
-  
+
   // Initialize database
   initDatabase();
-  
+
   // Load existing events
   loadEventsFromDB();
-  
+
   server.listen(CONFIG.port, () => {
     console.log(`HTTP API → http://0.0.0.0:${CONFIG.port}`);
     console.log('Endpoints: /stats /events /balance/:pubkey /history/:pubkey');
     console.log('           /export /db-stats /peers\n');
-    
+
     if (CONFIG.peerIndexers.length > 0) {
       console.log(`Peer Indexers: ${CONFIG.peerIndexers.length} configured`);
       CONFIG.peerIndexers.forEach(peer => console.log(`  - ${peer}`));
@@ -448,15 +448,15 @@ async function start() {
 
   // Do initial poll and sync
   await pollAllRelays();
-  
+
   if (CONFIG.peerIndexers.length > 0) {
     await syncWithPeers();
   }
-  
+
   // Set up polling interval
   setInterval(pollAllRelays, CONFIG.pollInterval);
   console.log(`\n⏰ Polling relays every ${CONFIG.pollInterval/1000} seconds`);
-  
+
   // Set up peer sync interval
   if (CONFIG.peerIndexers.length > 0) {
     setInterval(syncWithPeers, CONFIG.syncInterval);

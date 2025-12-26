@@ -9,18 +9,18 @@ const NOSTRCOIN = {
   INITIAL_BLOCK_REWARD: 50,
   HALVING_INTERVAL: 210000, // Halve every 210,000 blocks (~4 years)
   BLOCK_INTERVAL: 600000, // 10 minutes in milliseconds
-  DIFFICULTY: 5, // Leading zeros required in event ID; to change difficulty, both validator and miner must be the same
-  
+  DIFFICULTY: 4, // Leading zeros required in event ID
+
   // Event kinds (custom Nostrcoin kinds)
   KIND_GENESIS: 30000,
   KIND_MINING: 30333,    // NSTC mining attempts
   KIND_TRANSFER: 30334,  // NSTC transfers
-  
+
   // Protocol identifier
-  PROTOCOL_TAG: "nostrcoin-testlaunch",
-  
-  // Genesis block timestamp (launch day and time)
-  GENESIS_TIME: 1766581200000   // Genesis block timestamp for test launch: Dec 24 2025 13:00:00 UTC
+  PROTOCOL_TAG: "nostrcoin",
+
+  // Genesis block timestamp (set this to your launch time)
+  GENESIS_TIME: 1764968400000   // Wed Nov 27 2025 00:00:00 UTC
 };
 
 /**
@@ -28,12 +28,12 @@ const NOSTRCOIN = {
  */
 function getBlockReward(blockHeight) {
   const halvings = Math.floor(blockHeight / NOSTRCOIN.HALVING_INTERVAL);
-  
+
   // After 64 halvings, reward becomes 0 (all 21M mined)
   if (halvings >= 64) {
     return 0;
   }
-  
+
   // Calculate reward: 50 / (2^halvings)
   return NOSTRCOIN.INITIAL_BLOCK_REWARD / Math.pow(2, halvings);
 }
@@ -55,28 +55,28 @@ function validateMiningEvent(event, existingEvents = []) {
   if (!event.id || !event.pubkey || !event.created_at) {
     return { valid: false, reason: "Missing required fields" };
   }
-  
+
   // 2. Check protocol tag
   const protocolTag = event.tags?.find(t => t[0] === 'protocol' && t[1] === NOSTRCOIN.PROTOCOL_TAG);
   if (!protocolTag) {
     return { valid: false, reason: "Missing or invalid protocol tag" };
   }
-  
+
   // 3. Check difficulty (event ID must have N leading zeros)
   const requiredZeros = '0'.repeat(NOSTRCOIN.DIFFICULTY);
   if (!event.id.startsWith(requiredZeros)) {
     return { valid: false, reason: `Event ID must start with ${NOSTRCOIN.DIFFICULTY} zeros` };
   }
-  
+
   // 4. Determine epoch from timestamp
   const epoch = getEpoch(event.created_at * 1000); // Nostr uses seconds
-  
+
   // 5. Check if this epoch already has a winner
   const epochWinner = existingEvents.find(e => {
     const eventEpoch = getEpoch(e.created_at * 1000);
     return eventEpoch === epoch && e.id !== event.id;
   });
-  
+
   if (epochWinner) {
     // If there's already a winner, check if this event is earlier
     if (event.created_at < epochWinner.created_at) {
@@ -95,21 +95,21 @@ function validateMiningEvent(event, existingEvents = []) {
 
     return { valid: false, reason: "Epoch already has a winner" };
   }
-  
+
   // 6. Check user hasn't mined multiple times in same epoch (spam prevention)
   const userAttemptsThisEpoch = existingEvents.filter(e => {
     const eventEpoch = getEpoch(e.created_at * 1000);
     return e.pubkey === event.pubkey && eventEpoch === epoch;
   });
-  
+
   if (userAttemptsThisEpoch.length > 0) {
     return { valid: false, reason: "User already attempted mining this epoch" };
   }
-  
+
   // Calculate block height to determine reward
   const blockHeight = existingEvents.filter(e => e.kind === NOSTRCOIN.KIND_MINING).length;
   const reward = getBlockReward(blockHeight);
-  
+
   return { valid: true, reward, epoch };
 }
 
@@ -122,44 +122,44 @@ function validateTransferEvent(event, currentBalances = {}) {
   if (!event.id || !event.pubkey || !event.sig) {
     return { valid: false, reason: "Missing required fields" };
   }
-  
+
   // 2. Check protocol tag
   const protocolTag = event.tags?.find(t => t[0] === 'protocol' && t[1] === NOSTRCOIN.PROTOCOL_TAG);
   if (!protocolTag) {
     return { valid: false, reason: "Missing or invalid protocol tag" };
   }
-  
+
   // 3. Extract recipient and amount from tags
   const recipientTag = event.tags.find(t => t[0] === 'p');
   const amountTag = event.tags.find(t => t[0] === 'amount');
-  
+
   if (!recipientTag || !amountTag) {
     return { valid: false, reason: "Missing recipient or amount tag" };
   }
-  
+
   const recipient = recipientTag[1];
   const amount = parseFloat(amountTag[1]);
-  
+
   // 4. Validate amount
   if (isNaN(amount) || amount <= 0) {
     return { valid: false, reason: "Invalid amount" };
   }
-  
+
   if (amount > Math.pow(10, NOSTRCOIN.DECIMALS)) {
     return { valid: false, reason: "Amount exceeds maximum precision" };
   }
-  
+
   // 5. Check sender balance
   const senderBalance = currentBalances[event.pubkey] || 0;
   if (senderBalance < amount) {
     return { valid: false, reason: `Insufficient balance (has ${senderBalance}, needs ${amount})` };
   }
-  
+
   // 6. Prevent sending to self
   if (event.pubkey === recipient) {
     return { valid: false, reason: "Cannot send to self" };
   }
-  
+
   return { valid: true, amount, recipient, sender: event.pubkey };
 }
 
@@ -170,7 +170,7 @@ function validateTransferEvent(event, currentBalances = {}) {
 function computeBalances(events) {
   const balances = {};
   let totalSupply = 0;
-  
+
   // Sort events by timestamp, then by ID (for deterministic ordering)
   const sortedEvents = [...events].sort((a, b) => {
     if (a.created_at !== b.created_at) {
@@ -178,18 +178,18 @@ function computeBalances(events) {
     }
     return a.id.localeCompare(b.id);
   });
-  
+
   // Track which epochs have been mined
   const minedEpochs = new Set();
   let blockHeight = 0; // Track actual block count for halving
-  
+
   for (const event of sortedEvents) {
     if (event.kind === NOSTRCOIN.KIND_MINING) {
       const validation = validateMiningEvent(event, sortedEvents.slice(0, sortedEvents.indexOf(event)));
-      
+
       if (validation.valid) {
         const epoch = getEpoch(event.created_at * 1000);
-        
+
         // Only award if epoch not already mined
         if (!minedEpochs.has(epoch)) {
           const reward = getBlockReward(blockHeight);
@@ -200,17 +200,17 @@ function computeBalances(events) {
         }
       }
     }
-    
+
     if (event.kind === NOSTRCOIN.KIND_TRANSFER) {
       const validation = validateTransferEvent(event, balances);
-      
+
       if (validation.valid) {
         balances[validation.sender] = (balances[validation.sender] || 0) - validation.amount;
         balances[validation.recipient] = (balances[validation.recipient] || 0) + validation.amount;
       }
     }
   }
-  
+
   return { balances, totalSupply };
 }
 
@@ -227,10 +227,10 @@ function getBalance(pubkey, events) {
  */
 function getHistory(pubkey, events) {
   const history = [];
-  
+
   const sortedEvents = [...events].sort((a, b) => a.created_at - b.created_at);
   let blockHeight = 0;
-  
+
   for (const event of sortedEvents) {
     if (event.kind === NOSTRCOIN.KIND_MINING && event.pubkey === pubkey) {
       const validation = validateMiningEvent(event, sortedEvents.slice(0, sortedEvents.indexOf(event)));
@@ -252,15 +252,15 @@ function getHistory(pubkey, events) {
         blockHeight++;
       }
     }
-    
+
     if (event.kind === NOSTRCOIN.KIND_TRANSFER) {
       const recipientTag = event.tags.find(t => t[0] === 'p');
       const amountTag = event.tags.find(t => t[0] === 'amount');
-      
+
       if (recipientTag && amountTag) {
         const recipient = recipientTag[1];
         const amount = parseFloat(amountTag[1]);
-        
+
         if (event.pubkey === pubkey) {
           // Sent
           history.push({
@@ -283,7 +283,7 @@ function getHistory(pubkey, events) {
       }
     }
   }
-  
+
   return history;
 }
 
