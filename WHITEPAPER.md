@@ -8,7 +8,7 @@
 
 ## Abstract
 
-Nostrcoin (NSTC, pronounced "nestacy" or "nest") is a decentralized cryptocurrency built entirely on the Nostr protocol. Unlike traditional cryptocurrencies that rely on dedicated blockchain networks, Nostrcoin leverages Nostr's event system as its distributed ledger. This approach eliminates the need for separate blockchain infrastructure while maintaining the core principles of decentralization, transparency, and permissionless participation. Through proof-of-work mining, deterministic validation, and multi-indexer architecture, Nostrcoin demonstrates how existing decentralized protocols can be extended to support digital currency functionality.
+Nostrcoin (NSTC, pronounced "nestacy" or "nest") is a cryptocurrency built entirely on the Nostr protocol. Unlike traditional cryptocurrencies that use blockchains, Nostrcoin uses Nostr messages as its ledger. This approach eliminates the need for separate blockchain infrastructure while keeping the system decentralized, transparent, and open to everyone. Through mining, validation, and multiple indexers, Nostrcoin shows how existing protocols can be extended to support digital currency.
 
 The smallest unit of NSTC is called a "nok" (1 NSTC = 100,000,000 noks), analogous to satoshis in Bitcoin.
 
@@ -65,16 +65,12 @@ The smallest unit of NSTC is called a "nok" (1 NSTC = 100,000,000 noks), analogo
 - 7.2 [Precision and Units](#72-precision-and-units)
 - 7.3 [Use Cases (Educational)](#73-use-cases-educational)
 
-8. [Security Considerations](#8-security-considerations)
-- 8.1 [Attack Vectors](#81-attack-vectors)
-- 8.2 [Known Limitations](#82-known-limitations)
+8. [How You Can Help Nostrcoin](#8-how-you-can-help-nostrcoin)
+- 8.1 [Run an Always-On Node](#81-run-an-always-on-node)
+- 8.2 [Share Your Peer Address](#82-share-your-peer-address)
+- 8.3 [What We Need Most](#83-what-we-need-most)
 
-9. [How You Can Help Nostrcoin](#9-how-you-can-help-nostrcoin)
-- 9.1 [Run an Always-On Node](#91-run-an-always-on-node)
-- 9.2 [Share Your Peer Address](#92-share-your-peer-address)
-- 9.3 [What We Need Most](#93-what-we-need-most)
-
-10. [Conclusion](#10-conclusion)
+9. [Conclusion](#9-conclusion)
 
 [Appendices](#appendices)
 - [Appendix A: API Reference](#appendix-a-api-reference)
@@ -89,7 +85,7 @@ The smallest unit of NSTC is called a "nok" (1 NSTC = 100,000,000 noks), analogo
 
 The cryptocurrency landscape has historically required purpose-built blockchain infrastructure, each network operating independently with its own nodes, consensus mechanisms, and validation rules. This approach, while effective, creates significant barriers to entry and limits interoperability between systems.
 
-Nostr (Notes and Other Stuff Transmitted by Relays) presents an alternative paradigm: a simple, decentralized protocol for distributing signed messages. While initially designed for social networking, Nostr's architecture—featuring cryptographic signatures, relay-based distribution, and event permanence—provides the foundational elements necessary for a decentralized currency system.
+Nostr (Notes and Other Stuff Transmitted by Relays) presents an alternative paradigm: a simple, decentralized protocol for distributing signed messages. While most widely used for social networking, Nostr's "other stuff" architecture—featuring cryptographic signatures, relay-based distribution, and event permanence—provides the foundational elements necessary for many other use cases, such as a decentralized currency system.
 
 ### 1.2 Design Philosophy
 
@@ -645,6 +641,21 @@ echo  "NOSTR_PRIVATE_KEY_HEX=your_64_character_hex_key"  >  .env
 node  miner.js
 ```
 
+**Tip: Use tmux to keep the miner running in the background**
+
+tmux is a terminal multiplexer that lets you detach from a session while processes continue running (perfect for long-running miners on a VPS).
+
+```bash
+# Install tmux (if not present)
+sudo apt install tmux  # Ubuntu/Debian
+
+# Start a new tmux session
+tmux new -s miner
+
+# Inside the session, run the miner
+node miner.js
+```
+
 ### 6.2 Mining Strategy
 
 -  **Continuous Operation**: Miner automatically moves to next epoch after finding a block
@@ -688,36 +699,11 @@ While Nostrcoin has no monetary value, it demonstrates:
 
 ---
 
-## 8. Security Considerations
-
-### 8.1 Attack Vectors
-
-**Double-Spend Prevention**
-- Deterministic validation ensures same-epoch blocks are rejected
-- First valid block (by timestamp) always wins
-
-**51% Attack Resistance**
-- Mining is computationally expensive (4 leading zeros)
-- Epoch system prevents rapid block production
-- No single entity controls relays
-
-**Sybil Attack Mitigation**
-- One attempt per pubkey per epoch
-- Proof-of-work requirement prevents spam
-
-### 8.2 Known Limitations
-
--  **No SPV Mode**: Light clients must trust indexers (or run their own)
--  **Relay Dependence**: Events must propagate through Nostr relays
--  **Timestamp Trust**: Relies on honest timestamp reporting by miners
-
----
-
-## 9. How You Can Help Nostrcoin
+## 8. How You Can Help Nostrcoin
 
 The network needs **always-on indexer nodes** to stay resilient and decentralized. True decentralization requires active participation.
 
-### 9.1 Run an Always-On Node
+### 8.1 Run an Always-On Node
 
 The most valuable contribution is running a public indexer 24/7:
 
@@ -742,7 +728,7 @@ The most valuable contribution is running a public indexer 24/7:
    - Add CORS headers for web wallet compatibility
 
 5. **Share your indexer URL**
-   - See section 9.2 below
+   - See section 8.2 below
 
 **Why this matters:**
 - More nodes = more resilient network
@@ -750,7 +736,7 @@ The most valuable contribution is running a public indexer 24/7:
 - More nodes = harder to censor or attack
 - Decentralization requires actual distributed nodes!
 
-### 9.2 Share Your Peer Address
+### 8.2 Share Your Peer Address
 
 If you're running an indexer or validator, **share your connection details**:
 
@@ -781,7 +767,7 @@ If you're running an indexer or validator, **share your connection details**:
    - Include API endpoints if available
    - Document any custom configurations
 
-### 9.3 What We Need Most
+### 8.3 What We Need Most
 
 **Priority 1: Always-On VPS Indexers**
 - Geographic diversity (different countries/continents)
@@ -811,7 +797,7 @@ If you're running an indexer or validator, **share your connection details**:
 
 ---
 
-## 10. Conclusion
+## 9. Conclusion
 
 Nostrcoin demonstrates that decentralized currency systems need not require dedicated blockchain infrastructure. By leveraging Nostr's existing relay network and event distribution system, Nostrcoin achieves:
 
@@ -822,4 +808,4 @@ Nostrcoin demonstrates that decentralized currency systems need not require dedi
 
 While Nostrcoin remains an educational experiment, it validates the concept of protocol-native currencies and opens possibilities for future Nostr-based financial applications.
 
-The network's strength lies in its participants. By running indexers
+The network's strength lies in its participants. By running indexers, mining, and participating in the network, users contribute to its decentralization and resilience. The more independent participants join, the stronger and more robust Nostrcoin becomes.

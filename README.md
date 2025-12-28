@@ -24,7 +24,7 @@ This is an experimental educational project. **Expect:**
 - It **will get hacked** (exploits will be found)
 - It **will get quantum computer'd** (eventually)
 - It **will get AI'd** (bots will game it)
-- It **will get rekt** (and any and all things bad will happen)
+- It **will get rekt** (any and all things bad will happen)
 
 **Do not invest real money. This has ZERO monetary value.**
 
@@ -45,6 +45,7 @@ nostrcoin/
 ├── miner.js                   # Continuous mining script (epoch-aware)
 ├── package.json               # Node.js dependencies
 ├── README.md                  # This file
+├── WHITEPAPER.md                  # The whitepaper
 └── LICENSE                    # MIT License
 ```
 
@@ -102,6 +103,21 @@ The miner will:
 - Check balance from the indexer after mining
 - Display hash rate and mining statistics
 - Check the forum for help: https://nostrcoin.boards.net
+
+**Tip: Use tmux to keep the miner running in the background**
+
+tmux is a terminal multiplexer that lets you detach from a session while processes continue running (perfect for long-running miners on a VPS).
+
+```bash
+# Install tmux (if not present)
+sudo apt install tmux  # Ubuntu/Debian
+
+# Start a new tmux session
+tmux new -s miner
+
+# Inside the session, run the miner
+node miner.js
+```
 
 ## How It Works
 
