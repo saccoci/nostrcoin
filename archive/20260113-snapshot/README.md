@@ -17,7 +17,7 @@ Nostrcoin is a fully decentralized cryptocurrency built entirely on Nostr. Unlik
 
 
 
-**Version:** 0.0.9 (Indexer) / 0.0.7 (Miner) / 0.0.5 (Validator)
+**Version:** 0.0.9 (Indexer) / 0.0.5 (Miner) / 0.0.5 (Validator)
 
 **Status:** Educational/Experimental
 

@@ -1,4 +1,4 @@
-// Nostrcoin Continuous Miner v0.0.5 - Using nostr-tools
+// Nostrcoin Continuous Miner v0.0.7 - Using nostr-tools
 require('dotenv').config();
 const crypto = require('crypto');
 const { WebSocket } = require('ws');
@@ -35,6 +35,9 @@ let stats = {
 let privateKeyHex = process.env.NOSTR_PRIVATE_KEY_HEX || null;
 let privateKey = null;
 let publicKey = null;
+
+// Custom mining message
+let miningMessage = 'Mining NSTC';
 
 /**
  * Publish event to relays
@@ -119,7 +122,7 @@ async function mineBlock(targetEpoch) {
         ['difficulty', CONFIG.difficulty.toString()],
         ['nonce', nonce]
       ],
-      content: 'Mining NSTC',
+      content: miningMessage,  // Use custom message
       pubkey: publicKey
     };
     
@@ -163,6 +166,7 @@ async function mineBlock(targetEpoch) {
       process.stdout.write('\r' + ' '.repeat(80) + '\r');
       console.log(`✨ BLOCK FOUND! Event ID: ${eventId}`);
       console.log(`   Attempts: ${attempts.toLocaleString()} | Time: ${elapsed.toFixed(2)}s`);
+      console.log(`   Message: "${miningMessage}"`);
       
       // Sign the event properly with nostr-tools
       event.id = eventId;
@@ -177,7 +181,7 @@ async function mineBlock(targetEpoch) {
       stats.lastBlockTime = new Date().toLocaleString();
       
       // Wait 5 seconds for indexer to process
-      console.log('⏳  Waiting for indexer to process...');
+      console.log('⏳ Waiting for indexer to process...');
       await new Promise(resolve => setTimeout(resolve, 5000));
       
       // Check new balance
@@ -185,7 +189,7 @@ async function mineBlock(targetEpoch) {
       if (balance !== null) {
         console.log(`💰 Current balance: ${balance} NSTC`);
       } else {
-        console.log('⚠️  Could not fetch balance from indexer');
+        console.log('⚠️ Could not fetch balance from indexer');
       }
       
       return true;
@@ -204,7 +208,8 @@ async function startMining() {
 
   console.log('\n🚀 Starting epoch-aware continuous mining...');
   console.log(`👤 Public key: ${publicKey.substring(0, 16)}...`);
-  console.log(`💎 Reward: 50 NSTC per block\n`);
+  console.log(`💎 Reward: 50 NSTC per block`);
+  console.log(`💬 Block message: "${miningMessage}"\n`);
 
   while (mining) {
     const now = Date.now();
@@ -216,7 +221,7 @@ async function startMining() {
     // Always wait for next epoch
     const waitMs = nextEpochStart - Date.now();
     if (waitMs > 0 && mining) {
-      console.log(`⏸️  Waiting ${(waitMs/1000).toFixed(0)}s for epoch ${currentEpoch + 1}...`);
+      console.log(`⏸️ Waiting ${(waitMs/1000).toFixed(0)}s for epoch ${currentEpoch + 1}...`);
       await new Promise(r => setTimeout(r, waitMs + 1000));
     }
   }
@@ -237,12 +242,38 @@ function displayStats() {
 }
 
 /**
+ * Parse command line arguments
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  
+  // Look for --message or -m flag
+  const messageIndex = args.indexOf('--message');
+  const mIndex = args.indexOf('-m');
+  
+  if (messageIndex !== -1 && args[messageIndex + 1]) {
+    miningMessage = args[messageIndex + 1];
+  } else if (mIndex !== -1 && args[mIndex + 1]) {
+    miningMessage = args[mIndex + 1];
+  }
+  
+  // Validate message length (280 chars max, like Twitter)
+  if (miningMessage.length > 280) {
+    console.log('⚠️  Warning: Message truncated to 280 characters');
+    miningMessage = miningMessage.substring(0, 280);
+  }
+}
+
+/**
  * Main entry point
  */
 async function main() {
   console.log('╔═══════════════════════════════════════╗');
-  console.log('║   Nostrcoin Continuous Miner v0.0.5   ║');
+  console.log('║   Nostrcoin Continuous Miner v0.0.7   ║');
   console.log('╚═══════════════════════════════════════╝\n');
+  
+  // Parse command line arguments
+  parseArgs();
   
   // Load private key
   if (!privateKeyHex) {
@@ -286,7 +317,7 @@ async function main() {
     console.log(`✓ Connected to indexer`);
     console.log(`💰 Current balance: ${balance} NSTC\n`);
   } else {
-    console.log('⚠️  Could not connect to indexer, but mining will continue\n');
+    console.log('⚠️ Could not connect to indexer, but mining will continue\n');
   }
   
   // Start mining
