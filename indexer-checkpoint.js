@@ -23,6 +23,8 @@ const CONFIG = {
   ],
   pollInterval: 15000, // Poll relays every 15 seconds
   syncInterval: 30000, // Sync with peers every 30 seconds
+  deepLookbackInterval: 600000, // Deep re-poll every epoch (10 min) to catch missed events
+  deepLookbackWindow: 1200,     // How far back to look on deep poll (seconds) — 20 min covers 2 epochs
   dbPath: './nostrcoin.db',
   // Add peer indexers here - these will be synced with
   peerIndexers: [
@@ -166,6 +168,54 @@ function pollRelay(relayUrl) {
       clearTimeout(timeout);
       resolve(receivedEvents);
     });
+  });
+}
+
+async function deepPollAllRelays() {
+  const lookbackTime = Math.floor(Date.now() / 1000) - CONFIG.deepLookbackWindow;
+  console.log(`\n🔭 Deep lookback poll (since ${new Date(lookbackTime * 1000).toLocaleTimeString()})...`);
+
+  const promises = CONFIG.relays.map(relay => pollRelayFrom(relay, lookbackTime));
+  const results = await Promise.allSettled(promises);
+
+  let newEventsCount = 0;
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      result.value.forEach(event => {
+        if (handleEvent(event, CONFIG.relays[index])) newEventsCount++;
+      });
+    }
+  });
+
+  console.log(`  Deep poll complete: ${newEventsCount} new event(s) recovered`);
+}
+
+// Variant of pollRelay that accepts an explicit since timestamp
+function pollRelayFrom(relayUrl, since) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(relayUrl);
+    const receivedEvents = [];
+    let timeout;
+
+    ws.on('open', () => {
+      const subId = 'deep-' + Date.now();
+      ws.send(JSON.stringify(['REQ', subId, {
+        kinds: CONFIG.eventKinds,
+        since
+      }]));
+      timeout = setTimeout(() => { ws.close(); resolve(receivedEvents); }, 8000);
+    });
+
+    ws.on('message', data => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg[0] === 'EVENT') receivedEvents.push(msg[2]);
+        if (msg[0] === 'EOSE') { clearTimeout(timeout); ws.close(); resolve(receivedEvents); }
+      } catch (e) {}
+    });
+
+    ws.on('error', () => { clearTimeout(timeout); resolve(receivedEvents); });
+    ws.on('close', () => { clearTimeout(timeout); resolve(receivedEvents); });
   });
 }
 
@@ -448,6 +498,7 @@ async function start() {
 
   // Do initial poll and sync
   await pollAllRelays();
+  await deepPollAllRelays();
 
   if (CONFIG.peerIndexers.length > 0) {
     await syncWithPeers();
@@ -456,6 +507,10 @@ async function start() {
   // Set up polling interval
   setInterval(pollAllRelays, CONFIG.pollInterval);
   console.log(`\n⏰ Polling relays every ${CONFIG.pollInterval/1000} seconds`);
+
+  // Deep lookback poll every epoch to recover any missed events
+  setInterval(deepPollAllRelays, CONFIG.deepLookbackInterval);
+  console.log(`⏰ Deep lookback poll every ${CONFIG.deepLookbackInterval/1000} seconds`);
 
   // Set up peer sync interval
   if (CONFIG.peerIndexers.length > 0) {

@@ -1,4 +1,4 @@
-// Nostrcoin Indexer Node v0.0.9 – With Halving Schedule
+// Nostrcoin Indexer Node v0.1.0 – Persistent Subscriptions
 const http = require('http');
 const { WebSocket } = require('ws');
 const validator = require('./nostrcoin-validator.js');
@@ -21,27 +21,32 @@ const CONFIG = {
     validator.NOSTRCOIN.KIND_MINING,
     validator.NOSTRCOIN.KIND_TRANSFER
   ],
-  pollInterval: 15000, // Poll relays every 15 seconds
-  syncInterval: 30000, // Sync with peers every 30 seconds
-  deepLookbackInterval: 600000, // Deep re-poll every epoch (10 min) to catch missed events
-  deepLookbackWindow: 1200,     // How far back to look on deep poll (seconds) — 20 min covers 2 epochs
+  // How far back to subscribe from on (re)connect — covers any gap while disconnected
+  subscribeBackSecs: 3600,
+  // Reconnect backoff: starts at 5s, doubles up to 5 min
+  reconnectBaseMs: 5000,
+  reconnectMaxMs:  300000,
+  // Periodic deep catchup — belt-and-suspenders against relay gaps
+  deepCatchupIntervalMs: 600000, // every 10 min
+  deepCatchupWindowSecs: 1800,   // look back 30 min
   dbPath: './nostrcoin.db',
-  // Add peer indexers here - these will be synced with
   peerIndexers: [
-    // Example: 'https://another-indexer.com',
-    // Add more as they become available
-  ]
+    // 'https://another-indexer.com',
+  ],
+  syncInterval: 30000,
 };
 
 let events = [];
-let lastPollTime = Math.floor(Date.now() / 1000) - 3600; // Start 1 hour ago
 let db;
 
-// Initialize database
+// Track the earliest created_at we know about per relay so we never miss a gap
+// Maps relayUrl -> unix timestamp of earliest safe "since" for that relay
+const relayLastSeen = {};
+
+// ── Database ──────────────────────────────────────────────────────────────────
+
 function initDatabase() {
   db = new Database(CONFIG.dbPath);
-
-  // Create events table
   db.exec(`
     CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
@@ -54,302 +59,91 @@ function initDatabase() {
       first_seen INTEGER NOT NULL,
       source_relay TEXT,
       epoch INTEGER
-    )
-  `);
-
-  // Create index for faster queries
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_kind ON events(kind);
-    CREATE INDEX IF NOT EXISTS idx_pubkey ON events(pubkey);
+    );
+    CREATE INDEX IF NOT EXISTS idx_kind       ON events(kind);
+    CREATE INDEX IF NOT EXISTS idx_pubkey     ON events(pubkey);
     CREATE INDEX IF NOT EXISTS idx_created_at ON events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_epoch ON events(epoch);
+    CREATE INDEX IF NOT EXISTS idx_epoch      ON events(epoch);
   `);
-
   console.log('✓ Database initialized');
 }
 
-// Load events from database
 function loadEventsFromDB() {
   const rows = db.prepare('SELECT * FROM events ORDER BY created_at ASC').all();
-
   events = rows.map(row => ({
-    id: row.id,
-    kind: row.kind,
-    pubkey: row.pubkey,
+    id:         row.id,
+    kind:       row.kind,
+    pubkey:     row.pubkey,
     created_at: row.created_at,
-    content: row.content,
-    tags: JSON.parse(row.tags),
-    sig: row.sig
+    content:    row.content,
+    tags:       JSON.parse(row.tags),
+    sig:        row.sig
   }));
-
   console.log(`✓ Loaded ${events.length} events from database`);
-
-  // Set lastPollTime to most recent event, or 1 hour ago if empty
-  if (events.length > 0) {
-    const mostRecent = Math.max(...events.map(e => e.created_at));
-    lastPollTime = mostRecent;
-  }
 }
 
-// Save event to database
 function saveEventToDB(event, sourceRelay) {
   try {
     const epoch = event.kind === validator.NOSTRCOIN.KIND_MINING
       ? validator.getEpoch(event.created_at * 1000)
       : null;
-
-    const stmt = db.prepare(`
+    db.prepare(`
       INSERT OR IGNORE INTO events
       (id, kind, pubkey, created_at, content, tags, sig, first_seen, source_relay, epoch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      event.id,
-      event.kind,
-      event.pubkey,
-      event.created_at,
-      event.content || '',
-      JSON.stringify(event.tags),
-      event.sig,
-      Math.floor(Date.now() / 1000),
-      sourceRelay,
-      epoch
+    `).run(
+      event.id, event.kind, event.pubkey, event.created_at,
+      event.content || '', JSON.stringify(event.tags), event.sig,
+      Math.floor(Date.now() / 1000), sourceRelay, epoch
     );
-
     return true;
-  } catch (error) {
-    console.error(`Error saving event to DB:`, error.message);
+  } catch (err) {
+    console.error('Error saving event to DB:', err.message);
     return false;
   }
 }
 
-function pollRelay(relayUrl) {
-  return new Promise((resolve) => {
-    const ws = new WebSocket(relayUrl);
-    const receivedEvents = [];
-    let timeout;
+// ── Event handling ────────────────────────────────────────────────────────────
 
-    ws.on('open', () => {
-      const subId = 'poll-' + Date.now();
-      ws.send(JSON.stringify(['REQ', subId, {
-        kinds: CONFIG.eventKinds,
-        since: lastPollTime
-      }]));
-
-      timeout = setTimeout(() => {
-        ws.close();
-        resolve(receivedEvents);
-      }, 5000);
-    });
-
-    ws.on('message', data => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg[0] === 'EVENT') {
-          receivedEvents.push(msg[2]);
-        }
-        if (msg[0] === 'EOSE') {
-          clearTimeout(timeout);
-          ws.close();
-          resolve(receivedEvents);
-        }
-      } catch (e) {
-        // Ignore parse errors
-      }
-    });
-
-    ws.on('error', () => {
-      clearTimeout(timeout);
-      resolve(receivedEvents);
-    });
-
-    ws.on('close', () => {
-      clearTimeout(timeout);
-      resolve(receivedEvents);
-    });
-  });
-}
-
-async function deepPollAllRelays() {
-  const lookbackTime = Math.floor(Date.now() / 1000) - CONFIG.deepLookbackWindow;
-  console.log(`\n🔭 Deep lookback poll (since ${new Date(lookbackTime * 1000).toLocaleTimeString()})...`);
-
-  const promises = CONFIG.relays.map(relay => pollRelayFrom(relay, lookbackTime));
-  const results = await Promise.allSettled(promises);
-
-  let newEventsCount = 0;
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      result.value.forEach(event => {
-        if (handleEvent(event, CONFIG.relays[index])) newEventsCount++;
-      });
-    }
-  });
-
-  console.log(`  Deep poll complete: ${newEventsCount} new event(s) recovered`);
-}
-
-// Variant of pollRelay that accepts an explicit since timestamp
-function pollRelayFrom(relayUrl, since) {
-  return new Promise((resolve) => {
-    const ws = new WebSocket(relayUrl);
-    const receivedEvents = [];
-    let timeout;
-
-    ws.on('open', () => {
-      const subId = 'deep-' + Date.now();
-      ws.send(JSON.stringify(['REQ', subId, {
-        kinds: CONFIG.eventKinds,
-        since
-      }]));
-      timeout = setTimeout(() => { ws.close(); resolve(receivedEvents); }, 8000);
-    });
-
-    ws.on('message', data => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg[0] === 'EVENT') receivedEvents.push(msg[2]);
-        if (msg[0] === 'EOSE') { clearTimeout(timeout); ws.close(); resolve(receivedEvents); }
-      } catch (e) {}
-    });
-
-    ws.on('error', () => { clearTimeout(timeout); resolve(receivedEvents); });
-    ws.on('close', () => { clearTimeout(timeout); resolve(receivedEvents); });
-  });
-}
-
-async function pollAllRelays() {
-  console.log(`\n🔍 Polling relays for new events (since ${new Date(lastPollTime * 1000).toLocaleTimeString()})...`);
-
-  const promises = CONFIG.relays.map(relay => pollRelay(relay));
-  const results = await Promise.allSettled(promises);
-
-  let newEventsCount = 0;
-  let totalEventsReceived = 0;
-
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      totalEventsReceived += result.value.length;
-      if (result.value.length > 0) {
-        console.log(`  ✓ ${CONFIG.relays[index]}: ${result.value.length} events`);
-        result.value.forEach(event => {
-          if (handleEvent(event, CONFIG.relays[index])) {
-            newEventsCount++;
-          }
-        });
-      }
-    }
-  });
-
-  console.log(`  Total: ${totalEventsReceived} received, ${newEventsCount} new`);
-
-  if (newEventsCount === 0 && totalEventsReceived === 0) {
-    console.log(`  No new events found`);
-  }
-
-  lastPollTime = Math.floor(Date.now() / 1000);
-}
-
-// NEW: Sync with peer indexers
-async function syncWithPeers() {
-  if (CONFIG.peerIndexers.length === 0) {
-    return; // No peers configured
-  }
-
-  console.log(`\n🔄 Syncing with ${CONFIG.peerIndexers.length} peer indexer(s)...`);
-
-  for (const peerUrl of CONFIG.peerIndexers) {
-    try {
-      console.log(`  → Fetching from ${peerUrl}`);
-
-      const response = await fetch(`${peerUrl}/export`, {
-        timeout: 10000
-      });
-
-      if (!response.ok) {
-        console.log(`  ✗ ${peerUrl}: HTTP ${response.status}`);
-        continue;
-      }
-
-      const data = await response.json();
-      const peerEvents = data.events || [];
-
-      let newFromPeer = 0;
-      let conflictsResolved = 0;
-
-      for (const event of peerEvents) {
-        const result = handleEvent(event, `peer:${peerUrl}`);
-        if (result === true) {
-          newFromPeer++;
-        } else if (result === 'replaced') {
-          conflictsResolved++;
-        }
-      }
-
-      if (newFromPeer > 0 || conflictsResolved > 0) {
-        console.log(`  ✓ ${peerUrl}: ${newFromPeer} new, ${conflictsResolved} conflicts resolved`);
-      } else {
-        console.log(`  ✓ ${peerUrl}: Already synced`);
-      }
-
-    } catch (error) {
-      console.log(`  ✗ ${peerUrl}: ${error.message}`);
-    }
-  }
-}
-
-function handleEvent(event, sourceIdentifier) {
-  // Skip if we already have this exact event
+function handleEvent(event, source) {
   if (events.some(e => e.id === event.id)) return false;
 
-  // Check for protocol tag
-  const hasTag = event.tags?.some(t => t[0] === 'protocol' && t[1] === validator.NOSTRCOIN.PROTOCOL_TAG);
+  const hasTag = event.tags?.some(
+    t => t[0] === 'protocol' && t[1] === validator.NOSTRCOIN.PROTOCOL_TAG
+  );
   if (!hasTag) return false;
 
-  const sourceDisplay = sourceIdentifier.startsWith('peer:')
-    ? sourceIdentifier.replace('peer:', '📡 ')
-    : sourceIdentifier;
-
-  console.log(`  → New event from ${sourceDisplay} – kind ${event.kind} – ${event.pubkey.slice(0,8)}...`);
+  const src = source.startsWith('peer:') ? source.replace('peer:', '📡 ') : source;
+  console.log(`  → New event from ${src} – kind ${event.kind} – ${event.pubkey.slice(0,8)}...`);
 
   if (event.kind === validator.NOSTRCOIN.KIND_MINING) {
     const epoch = validator.getEpoch(event.created_at * 1000);
+    const existing = events.find(e =>
+      e.kind === validator.NOSTRCOIN.KIND_MINING &&
+      validator.getEpoch(e.created_at * 1000) === epoch
+    );
 
-    const existingEpochEvent = events.find(e => {
-      if (e.kind !== validator.NOSTRCOIN.KIND_MINING) return false;
-      const eEpoch = validator.getEpoch(e.created_at * 1000);
-      return eEpoch === epoch;
-    });
-
-    if (existingEpochEvent) {
-      if (event.created_at < existingEpochEvent.created_at) {
-        console.log(`     Replacing old block for epoch ${epoch}`);
-        events = events.filter(e => e.id !== existingEpochEvent.id);
-        db.prepare('DELETE FROM events WHERE id = ?').run(existingEpochEvent.id);
+    if (existing) {
+      const replaceByTime = event.created_at < existing.created_at;
+      const replaceByTie  = event.created_at === existing.created_at && event.id < existing.id;
+      if (replaceByTime || replaceByTie) {
+        const reason = replaceByTime ? 'earlier timestamp' : 'tie-breaker';
+        console.log(`     Replacing existing block for epoch ${epoch} (${reason})`);
+        events = events.filter(e => e.id !== existing.id);
+        db.prepare('DELETE FROM events WHERE id = ?').run(existing.id);
         events.push(event);
-        saveEventToDB(event, sourceIdentifier);
+        saveEventToDB(event, source);
         return 'replaced';
       }
-
-      if (event.created_at === existingEpochEvent.created_at && event.id < existingEpochEvent.id) {
-        console.log(`     Replacing old block (tie-breaker) for epoch ${epoch}`);
-        events = events.filter(e => e.id !== existingEpochEvent.id);
-        db.prepare('DELETE FROM events WHERE id = ?').run(existingEpochEvent.id);
-        events.push(event);
-        saveEventToDB(event, sourceIdentifier);
-        return 'replaced';
-      }
-
-      console.log(`     Rejected (existing block better) for epoch ${epoch}`);
+      console.log(`     Rejected (existing block wins) for epoch ${epoch}`);
       return false;
     }
 
     const v = validator.validateMiningEvent(event, events);
     if (v.valid) {
-      console.log(`     ✓ Valid mining! Epoch ${epoch} → +50 NSTC`);
+      console.log(`     ✓ Valid mining! Epoch ${epoch} → +${validator.getBlockReward ? validator.getBlockReward(events.filter(e => e.kind === validator.NOSTRCOIN.KIND_MINING).length) : 50} NSTC`);
       events.push(event);
-      saveEventToDB(event, sourceIdentifier);
+      saveEventToDB(event, source);
       return true;
     } else {
       console.log(`     ✗ Invalid: ${v.reason}`);
@@ -358,59 +152,210 @@ function handleEvent(event, sourceIdentifier) {
   }
 
   if (event.kind === validator.NOSTRCOIN.KIND_TRANSFER) {
-    console.log(`     ✓ Valid transfer`);
+    console.log('     ✓ Valid transfer');
     events.push(event);
-    saveEventToDB(event, sourceIdentifier);
+    saveEventToDB(event, source);
     return true;
   }
 
   return false;
 }
 
+// ── Persistent relay subscriptions ───────────────────────────────────────────
+// Each relay gets its own persistent WebSocket with automatic reconnection.
+// On (re)connect we subscribe from (lastSeen - buffer) so no event slips
+// through the gap while we were disconnected.
+
+const relayConnections = new Map(); // relayUrl -> { ws, reconnectMs, pingInterval }
+
+function connectRelay(relayUrl) {
+  // Prevent double-connect
+  const existing = relayConnections.get(relayUrl);
+  if (existing && existing.ws &&
+      (existing.ws.readyState === WebSocket.CONNECTING ||
+       existing.ws.readyState === WebSocket.OPEN)) {
+    return;
+  }
+
+  const state = relayConnections.get(relayUrl) || { reconnectMs: CONFIG.reconnectBaseMs };
+  relayConnections.set(relayUrl, state);
+
+  console.log(`🔌 Connecting to ${relayUrl}...`);
+  const ws = new WebSocket(relayUrl);
+  state.ws = ws;
+
+  ws.on('open', () => {
+    console.log(`✓ Connected: ${relayUrl}`);
+    state.reconnectMs = CONFIG.reconnectBaseMs; // reset backoff on success
+
+    // Subscribe from (lastSeen - buffer) or subscribeBackSecs ago, whichever is earlier
+    const sinceBase = relayLastSeen[relayUrl]
+      ? relayLastSeen[relayUrl] - 60          // 60s overlap to never miss boundary events
+      : Math.floor(Date.now() / 1000) - CONFIG.subscribeBackSecs;
+
+    const subId = 'nstc-' + Date.now();
+    ws.send(JSON.stringify(['REQ', subId, {
+      kinds: CONFIG.eventKinds,
+      since: sinceBase
+    }]));
+
+    // Keepalive ping every 30s — prevents relay dropping idle connections
+    if (state.pingInterval) clearInterval(state.pingInterval);
+    state.pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      }
+    }, 30000);
+  });
+
+  ws.on('message', data => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg[0] === 'EVENT' && msg[2]) {
+        const event = msg[2];
+        // Track most recent created_at seen from this relay
+        if (!relayLastSeen[relayUrl] || event.created_at > relayLastSeen[relayUrl]) {
+          relayLastSeen[relayUrl] = event.created_at;
+        }
+        handleEvent(event, relayUrl);
+      }
+      // EOSE = end of stored events; subscription stays open for live events
+      if (msg[0] === 'EOSE') {
+        console.log(`  📬 Caught up on stored events from ${relayUrl}`);
+      }
+      if (msg[0] === 'NOTICE') {
+        console.log(`  📢 Notice from ${relayUrl}: ${msg[1]}`);
+      }
+    } catch (e) { /* ignore parse errors */ }
+  });
+
+  ws.on('pong', () => {
+    // Relay is alive, nothing to do
+  });
+
+  ws.on('error', err => {
+    console.log(`⚠️  Error on ${relayUrl}: ${err.message}`);
+  });
+
+  ws.on('close', (code, reason) => {
+    if (state.pingInterval) { clearInterval(state.pingInterval); state.pingInterval = null; }
+    console.log(`🔴 Disconnected from ${relayUrl} (code ${code}) — reconnecting in ${state.reconnectMs/1000}s`);
+    setTimeout(() => {
+      // Exponential backoff, capped at max
+      state.reconnectMs = Math.min(state.reconnectMs * 2, CONFIG.reconnectMaxMs);
+      connectRelay(relayUrl);
+    }, state.reconnectMs);
+  });
+}
+
+function connectAllRelays() {
+  console.log(`\n📡 Opening persistent subscriptions to ${CONFIG.relays.length} relays...`);
+  CONFIG.relays.forEach(connectRelay);
+}
+
+// ── Deep catchup (belt-and-suspenders) ───────────────────────────────────────
+// Belt-and-suspenders: even with persistent subs, do a one-shot sweep every
+// epoch in case a relay dropped an event without sending it to our sub.
+
+async function deepCatchup() {
+  const since = Math.floor(Date.now() / 1000) - CONFIG.deepCatchupWindowSecs;
+  console.log(`\n🔭 Deep catchup sweep (last ${CONFIG.deepCatchupWindowSecs/60} min)...`);
+
+  const promises = CONFIG.relays.map(relayUrl => new Promise(resolve => {
+    const ws = new WebSocket(relayUrl);
+    const found = [];
+    let done = false;
+    const finish = () => { if (!done) { done = true; ws.close(); resolve(found); } };
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify(['REQ', 'catchup-' + Date.now(), { kinds: CONFIG.eventKinds, since }]));
+      setTimeout(finish, 10000);
+    });
+    ws.on('message', data => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg[0] === 'EVENT' && msg[2]) found.push(msg[2]);
+        if (msg[0] === 'EOSE') finish();
+      } catch (e) {}
+    });
+    ws.on('error', finish);
+    ws.on('close', finish);
+  }));
+
+  const results = await Promise.allSettled(promises);
+  let recovered = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      r.value.forEach(ev => { if (handleEvent(ev, CONFIG.relays[i])) recovered++; });
+    }
+  });
+  if (recovered > 0) {
+    console.log(`  ✅ Deep catchup recovered ${recovered} event(s)`);
+  } else {
+    console.log(`  ✓ Deep catchup: nothing missed`);
+  }
+}
+
+// ── Peer sync ─────────────────────────────────────────────────────────────────
+
+async function syncWithPeers() {
+  if (CONFIG.peerIndexers.length === 0) return;
+  console.log(`\n🔄 Syncing with ${CONFIG.peerIndexers.length} peer indexer(s)...`);
+  for (const peerUrl of CONFIG.peerIndexers) {
+    try {
+      const response = await fetch(`${peerUrl}/export`);
+      if (!response.ok) { console.log(`  ✗ ${peerUrl}: HTTP ${response.status}`); continue; }
+      const data = await response.json();
+      let newFromPeer = 0, conflicts = 0;
+      for (const ev of (data.events || [])) {
+        const r = handleEvent(ev, `peer:${peerUrl}`);
+        if (r === true) newFromPeer++;
+        if (r === 'replaced') conflicts++;
+      }
+      console.log(`  ✓ ${peerUrl}: ${newFromPeer} new, ${conflicts} conflicts resolved`);
+    } catch (err) {
+      console.log(`  ✗ ${peerUrl}: ${err.message}`);
+    }
+  }
+}
+
+// ── HTTP API ──────────────────────────────────────────────────────────────────
+
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
   if (url.pathname.startsWith('/balance/')) {
     const pubkey = url.pathname.split('/')[2];
-    const balance = validator.getBalance(pubkey, events);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ pubkey, balance, timestamp: Date.now() }));
+    res.end(JSON.stringify({ pubkey, balance: validator.getBalance(pubkey, events), timestamp: Date.now() }));
     return;
   }
 
   if (url.pathname.startsWith('/history/')) {
     const pubkey = url.pathname.split('/')[2];
-    const history = validator.getHistory(pubkey, events);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ pubkey, history, timestamp: Date.now() }));
+    res.end(JSON.stringify({ pubkey, history: validator.getHistory(pubkey, events), timestamp: Date.now() }));
     return;
   }
 
   if (url.pathname === '/stats') {
     const result = validator.computeBalances(events);
-    const totalSupply = result.totalSupply || 0;
-    const uniqueHolders = Object.keys(result.balances || {}).length;
-    const currentEpoch = validator.getEpoch(Date.now());
-
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      totalSupply,
-      uniqueHolders,
-      totalEvents: events.length,
-      currentEpoch,
+      totalSupply:    result.totalSupply || 0,
+      uniqueHolders:  Object.keys(result.balances || {}).length,
+      totalEvents:    events.length,
+      currentEpoch:   validator.getEpoch(Date.now()),
       connectedRelays: CONFIG.relays.length,
-      peerIndexers: CONFIG.peerIndexers.length,
-      timestamp: Date.now()
+      activeRelays:   [...relayConnections.entries()]
+                        .filter(([,s]) => s.ws && s.ws.readyState === WebSocket.OPEN).length,
+      peerIndexers:   CONFIG.peerIndexers.length,
+      timestamp:      Date.now()
     }));
     return;
   }
@@ -419,52 +364,58 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       events: events.map(e => ({
-        id: e.id,
-        kind: e.kind,
-        pubkey: e.pubkey,
+        id:         e.id,
+        kind:       e.kind,
+        pubkey:     e.pubkey,
         created_at: e.created_at,
-        tags: e.tags,
-        epoch: e.kind === validator.NOSTRCOIN.KIND_MINING ? validator.getEpoch(e.created_at * 1000) : undefined
+        tags:       e.tags,
+        epoch:      e.kind === validator.NOSTRCOIN.KIND_MINING
+                      ? validator.getEpoch(e.created_at * 1000) : undefined
       })),
       total: events.length
     }));
     return;
   }
 
-  // Export all events (for peer sync and reconciliation)
   if (url.pathname === '/export') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      events: events,
-      total: events.length,
-      exportedAt: Date.now()
-    }));
+    res.end(JSON.stringify({ events, total: events.length, exportedAt: Date.now() }));
     return;
   }
 
-  // Database stats
   if (url.pathname === '/db-stats') {
-    const totalRows = db.prepare('SELECT COUNT(*) as count FROM events').get();
-    const oldestEvent = db.prepare('SELECT MIN(created_at) as oldest FROM events').get();
-    const newestEvent = db.prepare('SELECT MAX(created_at) as newest FROM events').get();
-
+    const total   = db.prepare('SELECT COUNT(*) as c FROM events').get();
+    const oldest  = db.prepare('SELECT MIN(created_at) as t FROM events').get();
+    const newest  = db.prepare('SELECT MAX(created_at) as t FROM events').get();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      totalStoredEvents: totalRows.count,
-      oldestEventTime: oldestEvent.oldest,
-      newestEventTime: newestEvent.newest,
-      databaseSize: fs.statSync(CONFIG.dbPath).size
+      totalStoredEvents: total.c,
+      oldestEventTime:   oldest.t,
+      newestEventTime:   newest.t,
+      databaseSize:      fs.statSync(CONFIG.dbPath).size
     }));
     return;
   }
 
-  // NEW: Peer info endpoint
   if (url.pathname === '/peers') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      peers: CONFIG.peerIndexers,
-      totalPeers: CONFIG.peerIndexers.length
+    res.end(JSON.stringify({ peers: CONFIG.peerIndexers, totalPeers: CONFIG.peerIndexers.length }));
+    return;
+  }
+
+  // Relay connection status — useful for debugging
+  if (url.pathname === '/relay-status') {
+    const states = ['CONNECTING','OPEN','CLOSING','CLOSED'];
+    const status = CONFIG.relays.map(url => ({
+      url,
+      state: relayConnections.has(url)
+        ? (states[relayConnections.get(url).ws?.readyState] || 'UNKNOWN')
+        : 'NOT_STARTED',
+      lastSeen: relayLastSeen[url]
+        ? new Date(relayLastSeen[url] * 1000).toISOString() : null
     }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ relays: status, timestamp: Date.now() }));
     return;
   }
 
@@ -472,55 +423,48 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
+// ── Start ─────────────────────────────────────────────────────────────────────
+
 async function start() {
-  console.log('Nostrcoin Indexer v0.0.8 – With Multi-Indexer Sync');
-  console.log('===================================================\n');
+  console.log('Nostrcoin Indexer v0.1.0 – Persistent Subscriptions');
+  console.log('=====================================================\n');
 
-  // Initialize database
   initDatabase();
-
-  // Load existing events
   loadEventsFromDB();
 
   server.listen(CONFIG.port, () => {
     console.log(`HTTP API → http://0.0.0.0:${CONFIG.port}`);
     console.log('Endpoints: /stats /events /balance/:pubkey /history/:pubkey');
-    console.log('           /export /db-stats /peers\n');
-
+    console.log('           /export /db-stats /peers /relay-status\n');
     if (CONFIG.peerIndexers.length > 0) {
-      console.log(`Peer Indexers: ${CONFIG.peerIndexers.length} configured`);
-      CONFIG.peerIndexers.forEach(peer => console.log(`  - ${peer}`));
-      console.log('');
+      CONFIG.peerIndexers.forEach(p => console.log(`  Peer: ${p}`));
     } else {
-      console.log('Peer Indexers: None configured (this indexer runs independently)\n');
+      console.log('Peer Indexers: none configured\n');
     }
   });
 
-  // Do initial poll and sync
-  await pollAllRelays();
-  await deepPollAllRelays();
+  // Open persistent WebSocket subscriptions (this replaces polling)
+  connectAllRelays();
 
-  if (CONFIG.peerIndexers.length > 0) {
-    await syncWithPeers();
-  }
+  // Belt-and-suspenders deep catchup every epoch
+  setInterval(deepCatchup, CONFIG.deepCatchupIntervalMs);
+  console.log(`⏰ Deep catchup every ${CONFIG.deepCatchupIntervalMs/60000} min\n`);
 
-  // Set up polling interval
-  setInterval(pollAllRelays, CONFIG.pollInterval);
-  console.log(`\n⏰ Polling relays every ${CONFIG.pollInterval/1000} seconds`);
+  // Initial deep catchup after 10s (let connections establish first)
+  setTimeout(deepCatchup, 10000);
 
-  // Deep lookback poll every epoch to recover any missed events
-  setInterval(deepPollAllRelays, CONFIG.deepLookbackInterval);
-  console.log(`⏰ Deep lookback poll every ${CONFIG.deepLookbackInterval/1000} seconds`);
-
-  // Set up peer sync interval
   if (CONFIG.peerIndexers.length > 0) {
     setInterval(syncWithPeers, CONFIG.syncInterval);
-    console.log(`⏰ Syncing with peers every ${CONFIG.syncInterval/1000} seconds\n`);
+    console.log(`⏰ Peer sync every ${CONFIG.syncInterval/1000}s\n`);
   }
 }
 
 process.on('SIGINT', () => {
-  console.log('\n\nShutting down gracefully...');
+  console.log('\nShutting down gracefully...');
+  relayConnections.forEach(state => {
+    if (state.pingInterval) clearInterval(state.pingInterval);
+    if (state.ws) state.ws.close();
+  });
   if (db) db.close();
   server.close();
   process.exit(0);
